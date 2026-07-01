@@ -79,8 +79,9 @@ exactly this in lab1 — see [§9](#9-troubleshooting-guest-tanzu-standard-recon
 
 - TMC SM 1.4.2 running and healthy; migration complete.
 - Access to the extracted TMC SM **1.4.4** release bundle (`tmc-sm` tooling).
-- A host (or two, for air-gap) with `imgpkg` and access to Broadcom's registry
-  and/or Harbor.
+- A **Linux jumpbox** to run `tmc-sm` and `imgpkg` from — the `tmc-sm` installer
+  is **not supported on macOS**, so all `tmc-sm` steps (push-images, console/UI,
+  install) must run there, with access to Broadcom's registry and/or Harbor.
 - Broadcom support-portal credentials for `projects.packages.broadcom.com`.
 - Harbor CA cert on hand for `imgpkg --registry-ca-cert-path` (self-signed lab).
 - The **v2026.1.21 release notes** for `fluxcd2`, `contour`, and `cert-manager`
@@ -325,9 +326,10 @@ run.
 
   # 2. Run the installer headless against your values file. It is idempotent —
   #    with a prior install present it upgrades in place.
-  # TODO: verify the exact headless subcommand/flags (`tmc-sm --help`). The line
-  #       below is the inferred shape, NOT a confirmed command — this env was
-  #       upgraded via `tmc-sm console` (UI), so the CLI form is unverified.
+  # TODO: verify the exact headless subcommand/flags (`tmc-sm --help`) on the
+  #       Linux jumpbox — tmc-sm is not supported on macOS. The line below is the
+  #       inferred shape, NOT a confirmed command; this env was upgraded via
+  #       `tmc-sm console` (UI), so the CLI form is unverified.
   tmc-sm install --config sm_values.yaml ...
   ```
 
