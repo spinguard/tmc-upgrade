@@ -40,7 +40,7 @@ into every managed guest cluster:
 | # | What ships | Repo on the **TMC SM** cluster | Repo on **each managed guest** |
 | --- | --- | --- | --- |
 | 1 | TMC SM platform (control-plane services) | `tanzu-mission-control-packages` (`tmc-local`) → **1.4.4** | _not present_ |
-| 2 | Tanzu Standard Package Repository (Contour, cert-manager, **fluxcd2**, external-dns, Harbor, Prometheus, Grafana, …) | `tanzu-standard` (`tkg-system`) → **v2026.1.21** | `tanzu-standard` (`tkg-system`) → **v2026.1.21** |
+| 2 | Tanzu Standard Package Repository (Contour, cert-manager, **fluxcd** source/kustomize/helm controllers, external-dns, Harbor, Prometheus, Grafana, …) | `tanzu-standard` (`tkg-system`) → **v2026.1.21** | `tanzu-standard` (`tkg-system`) → **v2026.1.21** |
 
 The guest-side `tanzu-standard` `PackageRepository` is **TMC-owned** (annotated
 `tanzu.vmware.com/owner: tmc`). During the SM upgrade, TMC rewrites its bundle
@@ -84,7 +84,7 @@ exactly this in lab1 — see [§9](#9-troubleshooting-guest-tanzu-standard-recon
   install) must run there, with access to Broadcom's registry and/or Harbor.
 - Broadcom support-portal credentials for `projects.packages.broadcom.com`.
 - Harbor CA cert on hand for `imgpkg --registry-ca-cert-path` (self-signed lab).
-- The **v2026.1.21 release notes** for `fluxcd2`, `contour`, and `cert-manager`
+- The **v2026.1.21 release notes** for the `fluxcd-*` packages, `contour`, and `cert-manager`
   — component-version deltas, package renames (the 1.4.3 rebrand known-issue),
   and any CRD storage-version changes. **Do not start Phase B without them.**
 
@@ -145,7 +145,8 @@ Run against each guest with TMC CD enabled and **save the output** — this is t
 "did anything actually change?" baseline you'll diff against after the upgrade:
 
 ```bash
-# Is fluxcd2 installed via the Tanzu Standard repo?
+# Are the fluxcd-* packages installed via the Tanzu Standard repo?
+# (fluxcd-source-controller / fluxcd-kustomize-controller / fluxcd-helm-controller)
 tanzu package installed list -A | grep -i flux
 
 # Current controller image tags
@@ -169,7 +170,7 @@ kubectl get gitrepositories,kustomizations,helmreleases -A
 
 ### 3.3 Choose a Flux strategy per guest
 
-Decide before Phase B how each CD-enabled, `fluxcd2`-bearing guest will be
+Decide before Phase B how each CD-enabled, `fluxcd-*`-bearing guest will be
 handled — see the decision tree in [§7](#7-the-continuous-delivery--flux-risk).
 If you choose the "disable TMC CD before, re-enable after" option, disable it
 now.
@@ -407,10 +408,12 @@ from one line in the TMC enable-CD docs:
 > installing a new one. If the CRDs are not present, TMC installs the Flux source
 > and Kustomize controllers and manages their lifecycles.
 
-**Translation:** on any guest where the Tanzu Standard `fluxcd2` package is
-installed, **kapp-controller — not TMC — owns Flux's lifecycle.** When the
-bundle bumps to v2026.1.21, kapp-controller re-templates the `fluxcd2`
-PackageInstall, rolling new controller images and possibly changing the
+**Translation:** on any guest where the Tanzu Standard `fluxcd-*` packages
+(`fluxcd-source-controller` / `fluxcd-kustomize-controller` /
+`fluxcd-helm-controller`) are installed, **kapp-controller — not TMC — owns
+Flux's lifecycle.** When the bundle bumps to v2026.1.21, kapp-controller
+re-templates those PackageInstalls, rolling new controller images and possibly
+changing the
 `*.toolkit.fluxcd.io` CRD storage version. TMC CD-managed reconciliations then
 start failing with:
 
@@ -427,14 +430,14 @@ reconciling.**
 ```text
 Is TMC CD enabled on this cluster?
   ├─ No  ─► Standard Repo bump is low-risk. Confirm Contour, done.
-  └─ Yes ─► Is `fluxcd2` PackageInstall present in tkg-system?
+  └─ Yes ─► Is a `fluxcd-*` PackageInstall present (ns tanzu-fluxcd-packageinstalls)?
              ├─ No  ─► TMC owns Flux; the bump can't mutate it. Safe.
              └─ Yes ─► Dual-ownership. Pick one:
                  (a) Disable TMC CD before Phase B, re-enable after.
                      Brief CD outage; lowest risk. TMC re-owns Flux on re-enable.
                  (b) Co-resident: leave both, treat the first post-upgrade
                      reconcile as the canary (below). Halt on API-group errors.
-                 (c) Remove the `fluxcd2` PackageInstall entirely (KB 375864).
+                 (c) Remove the `fluxcd-*` PackageInstalls entirely (KB 375864).
                      Long-term clean, short-term churn.
 ```
 
