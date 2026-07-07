@@ -34,7 +34,7 @@ Harbor host, project, and ECR-mirror path where shown.
 ## 1. The one thing to understand first
 
 The installer presents the upgrade as a single operation. It is really **two
-upgrades with two different blast radii**, and the second one silently reaches
+upgrades with two different zones**, and the second one silently reaches
 into every managed guest cluster:
 
 | # | What ships | Repo on the **TMC SM** cluster | Repo on **each managed guest** |
@@ -67,7 +67,7 @@ no signal that guests are being touched.
         └──────────┘  └──────────┘  └──────────┘
 ```
 
-**The single most important consequence:** the `v2026.1.21` bundle must already
+**Important note:** the `v2026.1.21` bundle must already
 be staged in Harbor at the path the guests resolve **before** the SM upgrade is
 initiated. Otherwise every guest flips to `ReconcileFailed` (`NOT_FOUND`) the
 moment TMC pushes the new URL, and stays there until you push the bundle. We hit
