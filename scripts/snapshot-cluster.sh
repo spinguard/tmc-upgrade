@@ -96,8 +96,22 @@ kubectl get validatingwebhookconfigurations,mutatingwebhookconfigurations -o wid
 if has_crd httpproxies.projectcontour.io; then
   kubectl get httpproxy -A > "$OUT/contour-httpproxy.txt" 2>/dev/null || true
 fi
-if has_crd certificates.cert-manager.io; then
-  kubectl get certificate,clusterissuer -A > "$OUT/cert-manager.txt" 2>/dev/null || true
+if has_crd certificates.cert-manager.io || has_crd clusterissuers.cert-manager.io; then
+  # Query each kind separately and guard each on its own CRD: a combined
+  # `get certificate,clusterissuer` fails whole if either type is absent (same
+  # footgun as the Flux CR query). ClusterIssuer is cluster-scoped, so it is
+  # listed without -A.
+  : > "$OUT/cert-manager.txt"
+  if has_crd certificates.cert-manager.io; then
+    echo "=== certificates ===" >> "$OUT/cert-manager.txt"
+    kubectl get certificate -A >> "$OUT/cert-manager.txt" 2>/dev/null || true
+    echo >> "$OUT/cert-manager.txt"
+  fi
+  if has_crd clusterissuers.cert-manager.io; then
+    echo "=== clusterissuers ===" >> "$OUT/cert-manager.txt"
+    kubectl get clusterissuer >> "$OUT/cert-manager.txt" 2>/dev/null || true
+    echo >> "$OUT/cert-manager.txt"
+  fi
 fi
 
 # --- Named component version matrix: cert-manager, contour, fluxcd, velero ---
@@ -114,8 +128,13 @@ COMPONENT_RE='cert-manager|contour|envoy|source-controller|kustomize-controller|
     | grep -Ei "PACKAGE|cert-manager|contour|flux" || echo "(none found)"
   echo
   echo "## Runtime container image tags (initContainers + containers)"
-  kubectl get deploy,daemonset,statefulset -A -o jsonpath='{range .items[*]}{.metadata.namespace}/{.kind}/{.metadata.name}{"\t"}{range .spec.template.spec.initContainers[*]}{.image}{" "}{end}{range .spec.template.spec.containers[*]}{.image}{" "}{end}{"\n"}{end}' 2>/dev/null \
-    | dedupe_line_images | grep -Ei "$COMPONENT_RE" | sort -u || echo "(none found)"
+  # Query each workload kind separately so an absent type can't blank the whole
+  # capture (same footgun as the Flux CR query above). deploy/ds/sts are core
+  # built-ins so they're always present today, but this keeps the pattern uniform
+  # and future-proofs adding any CRD-backed workload kind to the list.
+  for wl in deployment daemonset statefulset; do
+    kubectl get "$wl" -A -o jsonpath='{range .items[*]}{.metadata.namespace}/{.kind}/{.metadata.name}{"\t"}{range .spec.template.spec.initContainers[*]}{.image}{" "}{end}{range .spec.template.spec.containers[*]}{.image}{" "}{end}{"\n"}{end}' 2>/dev/null
+  done | dedupe_line_images | grep -Ei "$COMPONENT_RE" | sort -u || echo "(none found)"
 } > "$OUT/component-versions.txt" 2>/dev/null || true
 # velero CLI version too, if the client is installed and can reach the cluster
 if command -v velero >/dev/null 2>&1; then
