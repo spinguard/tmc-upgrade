@@ -26,12 +26,13 @@ Harbor host, project, and ECR-mirror path where shown.
 6. [Verification](#6-verification)
 7. [The Continuous Delivery / Flux risk](#7-the-continuous-delivery--flux-risk)
 8. [Contour on guest clusters](#8-contour-on-guest-clusters)
-9. [Troubleshooting: guest `tanzu-standard` ReconcileFailed](#9-troubleshooting-guest-tanzu-standard-reconcilefailed)
-10. [Companion documents & references](#10-companion-documents--references)
+9. [Velero / Data Protection](#9-velero--data-protection)
+10. [Troubleshooting: guest `tanzu-standard` ReconcileFailed](#10-troubleshooting-guest-tanzu-standard-reconcilefailed)
+11. [Companion documents & references](#11-companion-documents--references)
 
 ---
 
-## 1. The one thing to understand first
+## 1. Two Upgrades in One
 
 The installer presents the upgrade as a single operation. It is really **two
 upgrades with two different zones**, and the second one silently reaches
@@ -71,7 +72,7 @@ no signal that guests are being touched.
 be staged in Harbor at the path the guests resolve **before** the SM upgrade is
 initiated. Otherwise every guest flips to `ReconcileFailed` (`NOT_FOUND`) the
 moment TMC pushes the new URL, and stays there until you push the bundle. We hit
-exactly this in lab1 — see [§9](#9-troubleshooting-guest-tanzu-standard-reconcilefailed).
+exactly this in lab1 — see [§10](#10-troubleshooting-guest-tanzu-standard-reconcilefailed).
 
 ---
 
@@ -373,7 +374,7 @@ kubectl -n tkg-system get pkgr tanzu-standard -o yaml | grep -E 'image|Reconcile
 
 Expect `ReconcileSucceeded` and the `:v2026.1.21` URL. If you see
 `ReconcileFailed` / `NOT_FOUND`, jump to
-[§9](#9-troubleshooting-guest-tanzu-standard-reconcilefailed).
+[§10](#10-troubleshooting-guest-tanzu-standard-reconcilefailed).
 
 Also confirm:
 
@@ -476,9 +477,131 @@ If Contour was installed via TMC's extensions catalog rather than the Standard
 `PackageInstall`, the bundle bump does not move it. Confirm which case you're in
 with `tanzu package installed list -A`.
 
+### 8.1 O'Reilly Automotive exception — pinned Contour 1.28
+
+**This customer runs Contour self-managed.** Rather than take Contour from the
+TMC add-on catalog, O'Reilly manually provisioned it as a Carvel
+`PackageInstall` of the Tanzu Standard `contour.tanzu.vmware.com` package,
+**pinned to `1.28.2+vmware.1-tkg.1`**, and wants to hold at Contour 1.28 for now.
+
+**Verdict: the SM upgrade is safe for this install — _conditionally_.** Because
+the install is a **tight-pinned** `PackageInstall`, the catalog-vs-constraint
+model in [§6.3](#63-tip-on-interpreting-a-guest-bundle-bump) applies: a bundle
+bump does **not** force a version onto a pinned install. This was verified in
+lab1 — a guest with Contour pinned to an exact version stayed
+`ReconcileSucceeded` with an **unchanged image digest** across the
+`v2025.6.18 → v2026.1.21` bump. Tanzu Standard bundles are additive supersets, so
+`v2026.1.21` is expected to still carry Contour 1.28.2 for a pinned install to
+resolve against — but that presence is the one thing to confirm, not assume
+(precondition 2 below).
+
+> **Support caveat — 1.28 keeps running, but is _not supported_.** "Safe" above
+> means the pin holds and Contour 1.28.2 keeps **reconciling and serving traffic**
+> through the upgrade — it does **not** mean the version is supported. Broadcom
+> does not support Contour 1.28 at this TKG/TMC level, so holding here is a
+> deliberate, **unsupported configuration**: acceptable as a time-boxed choice,
+> but O'Reilly should plan a move to a supported Contour version and expect an
+> "upgrade to a supported version first" response on any Contour support case
+> filed against 1.28. Confirm the current supported-version floor via Broadcom
+> support: [Broadcom support portal][broadcom-support].
+
+Two preconditions **must be verified before Phase B** — do not assume:
+
+1. **The constraint is pinned to the exact 1.28.2 version, not wide.** A wide
+   constraint (`>=0.0.0`) would uptake the catalog max (currently up to
+   1.32.0+) and move them _off_ 1.28 — the opposite of what they want.
+
+   ```bash
+   kubectl get pkgi -A -o jsonpath='{range .items[*]}{.metadata.namespace}/{.metadata.name}: {.spec.packageRef.refName} @ {.spec.packageRef.versionSelection.constraints}{"\n"}{end}' \
+     | grep -i contour
+   # expect: ... contour.tanzu.vmware.com @ 1.28.2+vmware.1-tkg.1   (exact, not >=0.0.0)
+   ```
+
+2. **`contour.tanzu.vmware.com.1.28.2+vmware.1-tkg.1` is present in the
+   `v2026.1.21` catalog.** It is in `v2025.6.18` and Tanzu Standard catalogs are
+   additive, so it is expected to persist — but confirm against the **staged
+   `v2026.1.21` bundle** (query on a cluster already on `v2026.1.21`, or inspect
+   the staged bundle). If it is absent, the pinned install flips
+   `ReconcileFailed` / `NOT_FOUND` — the same failure shape as
+   [§10](#10-troubleshooting-guest-tanzu-standard-reconcilefailed).
+
+   ```bash
+   kubectl get packages -A | grep -i contour | grep '1.28.2+vmware.1-tkg.1'
+   ```
+
+**Post-upgrade:** confirm the Contour `PackageInstall` still
+`ReconcileSucceeded` on `1.28.2+vmware.1-tkg.1` with an **unchanged** controller
+image tag — no roll means the pin held and Envoy did not churn.
+
 ---
 
-## 9. Troubleshooting: guest `tanzu-standard` ReconcileFailed
+## 9. Velero / Data Protection
+
+Velero is the third guest-side component with a lifecycle of its own — but unlike
+Flux ([§7](#7-the-continuous-delivery--flux-risk)) and Contour
+([§8](#8-contour-on-guest-clusters)), it does **not** ride the Tanzu Standard
+bundle at all. TMC **Data Protection** deploys and reconciles Velero through the
+**TMC cluster agent** (`vmware-system-tmc`), and its version is **pinned to the
+TMC SM release** — there is no `PackageInstall`, no kapp `App`, and no
+`tanzu-standard` entry to read it from. The `v2026.1.21` bump therefore cannot
+move it (which is also why the [§4](#4-state-checkpoints-before-and-after)
+matrix tracks Velero by image tag only).
+
+**Current state (TMC SM 1.4.4), verified on the DP-enabled guest:**
+
+| Component | Version | Source |
+| --- | --- | --- |
+| Velero (server + node-agent) | **v1.13.2** | bundled with TMC SM 1.4.4 |
+| velero-plugin-for-aws | v1.9.2 | DP images |
+| velero-plugin-for-microsoft-azure | v1.9.2 | DP images |
+| velero-plugin-for-csi | v0.7.1 | DP images |
+
+Images come from `…/extensions/data-protection-images/…`, not
+`…/packages/standard/repo`. **Expectation: the 1.4.2 → 1.4.4 upgrade leaves
+Velero at 1.13.2.** Staying on 1.13.2 after the upgrade is correct, not a
+regression — Data Protection did not (and cannot) jump Velero to 1.15 on its own.
+
+**Verify:**
+
+```bash
+kubectl -n velero get deploy velero -o jsonpath='{.spec.template.spec.containers[0].image}{"\n"}'
+kubectl -n velero exec deploy/velero -c velero -- /velero version --client-only   # Version: v1.13.2
+kubectl get pkgi -A | grep -i velero   # expect: none — Velero is agent-managed, not a package
+```
+
+### 9.1 Upgrading Velero (e.g. 1.13 → 1.15)
+
+**You cannot upgrade the TMC-managed Velero in place, and should not try.**
+
+- **The agent owns it.** Hand-patching the `velero` deployment image is reverted
+  by the Data Protection controller (drift correction), and leaves you
+  unsupported in the meantime.
+- **1.13 → 1.15 is not an image swap.** Velero 1.14/1.15 carry CRD/API and
+  plugin-compatibility changes; the bundled plugins here (`aws` 1.9.2, `csi`
+  0.7.1) are matched to 1.13. A manual bump risks breaking BSLs, schedules, and
+  existing backup/restore compatibility.
+
+**Supported path — upgrade TMC.** Velero version is a function of the TMC SM
+release, so move Velero forward by upgrading TMC SM to a release whose Data
+Protection bundles the target Velero. Confirm the exact TMC → Velero mapping in
+the **Data Protection component matrix** of the target release notes (1.4.4 →
+1.13.2; a later line carries newer Velero). The new Velero + plugin images then
+roll into each DP-enabled guest's `velero` namespace the same agent-driven way
+the rest of this runbook describes.
+
+**Only alternative:** disable TMC Data Protection and run a **standalone**
+upstream Velero yourself. That gets you any Velero version immediately but you
+lose TMC-integrated backup management (policies, schedules, and the TMC UI). It
+is a decoupling decision, not an upgrade — not recommended just to advance one
+minor version.
+
+> **Broadcom support (portal).** Support-portal query confirming the supported
+> Velero version for TMC 1.4.4 and whether/how a newer Velero can be run:
+> [TMC 1.4.4 — supported Velero version & upgrade path][broadcom-support].
+
+---
+
+## 10. Troubleshooting: guest `tanzu-standard` ReconcileFailed
 
 **Symptom (seen in lab1, 2026-06-15):** after the SM upgrade, a guest's
 `tanzu-standard` PackageRepository is `ReconcileFailed` with:
@@ -517,7 +640,7 @@ on the next poll interval — no per-guest re-copy.
 
 ---
 
-## 10. Companion documents & references
+## 11. Companion documents & references
 
 ### In this repo
 
@@ -538,7 +661,9 @@ on the next poll interval — no per-guest re-copy.
 - [Carvel kapp-controller `PackageRepository` reference](https://carvel.dev/kapp-controller/docs/develop/packaging/)
 - [`imgpkg copy`](https://carvel.dev/imgpkg/docs/develop/copy/) · [air-gapped relocation](https://carvel.dev/imgpkg/docs/develop/air-gapped-workflow/)
 - [Flux upgrade compatibility](https://fluxcd.io/flux/installation/upgrade/) · [Flux components/CRDs](https://fluxcd.io/flux/components/)
+- [Broadcom support — TMC 1.4.4 supported Velero version & upgrade path][broadcom-support] (portal search; see [§9](#9-velero--data-protection))
 - KB 369984 — CD enablement API-group resolution error
 - KB 375864 — removing the Flux CD package after disable
 
 [tmc-upgrade-ui]: https://techdocs.broadcom.com/us/en/vmware-tanzu/standalone-components/tanzu-mission-control-self-managed/1-4/tmc-self-managed-documentation/install-and-run-tmc-self-managed/upgrading-tmc-self-managed.html#upgrade-tmc-ui
+[broadcom-support]: https://support.broadcom.com/web/ecx/search?searchString=I%20am%20running%20TMC%201.4.4.%20%20What%20is%20the%20supported%20version%20of%20Velero%20used%20by%20Data%20Protection,%20is%20it%20possible%20to%20run%20Velero%201.5.x,%20and%20if%20so,%20how%20to%20do%20it.&from=0&sortby=_score&orderBy=desc&pageNo=1&aggregations=%255B%257B%2522type%2522:%2522productname%2522,%2522filter%2522:%255B%2522Advanced%2520Cyber%2520Compliance%2522,%2522VCF%2520Automation%2522,%2522VCF%2520Operations%2522,%2522VCF%2520Operations%2520for%2520Networks%2522,%2522VCF%2520Private%2520AI%2520Services%2522,%2522VMware%2520Cloud%2520Director%2522,%2522VMware%2520Cloud%2520Foundation%2522,%2522VMware%2520Cloud%2520Foundation%2520Edge%2522,%2522VMware%2520Data%2520Services%2520Manager%2522,%2522VMware%2520Data%2520Services%2520Manager%2520for%2520VCF%2520Private%2520AI%2520Services%2522,%2522VMware%2520HCX%2522,%2522VMware%2520Live%2520Recovery%2522,%2522VMware%2520NSX%2522,%2522VMware%2520SDDC%2520Manager%2520/%2520VCF%2520Installer%2522,%2522VMware%2520Site%2520Recovery%2520Manager%2522,%2522VMware%2520vCenter%2520Server%2522,%2522VMware%2520vDefend%2520Firewall%2522,%2522VMware%2520vDefend%2520Firewall%2520with%2520Advanced%2520Threat%2520Prevention%2522,%2522VMware%2520vSAN%2522,%2522VMware%2520vSphere%2520ESXi%2522,%2522VMware%2520vSphere%2520Foundation%2522,%2522VMware%2520vSphere%2520Kubernetes%2520Service%2522%255D%257D%255D&uid=25b4c588-e69f-11ea-beba-0242ac12000b&resultsPerPage=10&exactPhrase=&withOneOrMore=&withoutTheWords=&pageSize=10&language=en
