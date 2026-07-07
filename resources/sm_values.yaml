@@ -1,0 +1,78 @@
+createNamespace: true
+namespace: tmc-local
+size: small
+dnsZone: tmc.lab1.mmtm.ai
+storageClass: workload-storage-policy
+authenticationType: federated
+idpGroupRoles:
+  admin: tmc:admin
+  member: tmc:member
+oidc:
+  authorizationScopes:
+    - offline_access
+    - email
+  claimGroups: groups
+  clientID: <clientId>
+  clientSecret: <clientSecret>
+  issuerURL: https://keycloak.lab1.mmtm.ai:9443/realms/tmc
+  issuerType: pinniped
+harborProject: harbor.lab1.mmtm.ai/tmc-sm
+contourEnvoy:
+  serviceType: LoadBalancer
+  loadBalancerClass: ""
+  loadBalancerIP: 192.168.204.196
+  nodeSelector: {}
+  serviceAnnotations: {}
+  nodeTolerations: []
+serverTLS:
+  type: clusterIssuer
+  clusterIssuer:
+    existing: false
+    name: local-issuer
+    namespace: cert-manager
+    caSecret:
+      tls.key: |-
+        <privateKey>
+      tls.crt: |-
+        <certificate>
+      ca.crt: |-
+        <caCertificate>
+trustedCAs:
+  keycloak-ca: |-
+    <keycloakCaCertificate>
+  harbor-ca: |-
+    <harborCaCertificate>
+postgres:
+  maxConnections: 300
+  userPassword: <userPassword>
+  storageClass: ""
+minio:
+  username: root
+  password: <minioPassword>
+  storageClass: ""
+kafka:
+  storageClass: ""
+  controllerExtraConfig:
+    logRetentionBytes: 1073741824
+    logRetentionHours: 168
+    logRetentionCheckIntervalMs: 300000
+redis:
+  password: <redisPassword>
+  storageClass: ""
+prometheusVolumeSize: 20Gi
+prometheus:
+  memoryLimit: 1Gi
+  retention: 2d
+  storageClass: ""
+alertmanager:
+  criticalAlertReceiver: {}
+  storageClass: ""
+  warningAlertReceiver: {}
+certManager:
+  certificate:
+    duration: 8780h
+    renewBefore: 780h
+telemetry:
+  ceipAgreement: false
+  ceipOptIn: false
+  eanNumber: ""
