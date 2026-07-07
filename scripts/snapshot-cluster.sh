@@ -75,8 +75,18 @@ kubectl get apiservices -o wide > "$OUT/apiservices.txt" 2>/dev/null || true
 kubectl api-resources > "$OUT/api-resources.txt" 2> "$OUT/api-resources.err" || true
 
 # --- #3: Flux CR reconcile truth (where CD-enabled) ---
-kubectl get gitrepositories,kustomizations,helmreleases,helmrepositories,ocirepositories -A -o wide \
-  > "$OUT/flux-resources.txt" 2>/dev/null || true
+# Query each kind separately: `kubectl get a,b,c` fails the WHOLE command if any
+# one kind's CRD is absent (e.g. no helmreleases when helm-controller isn't
+# installed — TMC CD ships only source + kustomize controllers), which would
+# silently blank the file even when other Flux CRs exist.
+: > "$OUT/flux-resources.txt"
+FLUX_KINDS="$(kubectl api-resources --no-headers 2>/dev/null | awk '{print $1}')"
+for kind in gitrepositories kustomizations helmreleases helmrepositories ocirepositories buckets; do
+  printf '%s\n' "$FLUX_KINDS" | grep -qx "$kind" || continue
+  echo "=== $kind ===" >> "$OUT/flux-resources.txt"
+  kubectl get "$kind" -A -o wide >> "$OUT/flux-resources.txt" 2>/dev/null || true
+  echo >> "$OUT/flux-resources.txt"
+done
 
 # --- #4: Admission webhooks (cert-manager et al. can silently rewrite these) ---
 kubectl get validatingwebhookconfigurations,mutatingwebhookconfigurations -o wide \
