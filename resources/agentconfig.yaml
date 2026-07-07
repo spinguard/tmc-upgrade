@@ -1,0 +1,10 @@
+apiVersion: "installers.tmc.cloud.vmware.com/v1alpha1"
+kind: "AgentConfig"
+metadata:
+  name: "tmc-agent-config"
+  namespace: "svc-tmc-c9"
+spec:
+  caCerts: |-
+    <tmcCaCertificate>
+  allowedHostNames:
+    - "tmc.lab1.mmtm.ai"
