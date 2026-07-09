@@ -327,13 +327,20 @@ run.
   tmc-sm push-images ...
 
   # 2. Run the installer headless against your values file. It is idempotent —
-  #    with a prior install present it upgrades in place.
-  # TODO: verify the exact headless subcommand/flags (`tmc-sm --help`) on the
-  #       Linux jumpbox — tmc-sm is not supported on macOS. The line below is the
-  #       inferred shape, NOT a confirmed command; this env was upgraded via
-  #       `tmc-sm console` (UI), so the CLI form is unverified.
-  tmc-sm install --config sm_values.yaml ...
+  #    with a prior install present the same `install` command upgrades in place
+  #    (there is no separate `upgrade` subcommand).
+  ./tmc-sm install \
+    --registry-username <harbor-user> \
+    --registry-password <harbor-password> \
+    --values-file sm_values.yaml \
+    --kubeconfig <path-to-tmc-sm-kubeconfig>
   ```
+
+  Flags: `--values-file` is the `sm_values.yaml` config (the old `--config`
+  spelling is wrong); `--kubeconfig` points at the TMC SM cluster; and
+  `--registry-username` / `--registry-password` are the Harbor registry
+  credentials the installer uses to pull the staged 1.4.4 images. Source:
+  [Upgrading TMC Self-Managed — CLI][tmc-upgrade-cli].
 
 ### 5.2 Raw Carvel (inspection / troubleshooting only)
 
@@ -666,4 +673,5 @@ on the next poll interval — no per-guest re-copy.
 - KB 375864 — removing the Flux CD package after disable
 
 [tmc-upgrade-ui]: https://techdocs.broadcom.com/us/en/vmware-tanzu/standalone-components/tanzu-mission-control-self-managed/1-4/tmc-self-managed-documentation/install-and-run-tmc-self-managed/upgrading-tmc-self-managed.html#upgrade-tmc-ui
+[tmc-upgrade-cli]: https://techdocs.broadcom.com/us/en/vmware-tanzu/standalone-components/tanzu-mission-control-self-managed/1-4/tmc-self-managed-documentation/install-and-run-tmc-self-managed/upgrading-tmc-self-managed.html#upgrade-tmc-sm-cli
 [broadcom-support]: https://support.broadcom.com/web/ecx/search?searchString=I%20am%20running%20TMC%201.4.4.%20%20What%20is%20the%20supported%20version%20of%20Velero%20used%20by%20Data%20Protection,%20is%20it%20possible%20to%20run%20Velero%201.5.x,%20and%20if%20so,%20how%20to%20do%20it.&from=0&sortby=_score&orderBy=desc&pageNo=1&aggregations=%255B%257B%2522type%2522:%2522productname%2522,%2522filter%2522:%255B%2522Advanced%2520Cyber%2520Compliance%2522,%2522VCF%2520Automation%2522,%2522VCF%2520Operations%2522,%2522VCF%2520Operations%2520for%2520Networks%2522,%2522VCF%2520Private%2520AI%2520Services%2522,%2522VMware%2520Cloud%2520Director%2522,%2522VMware%2520Cloud%2520Foundation%2522,%2522VMware%2520Cloud%2520Foundation%2520Edge%2522,%2522VMware%2520Data%2520Services%2520Manager%2522,%2522VMware%2520Data%2520Services%2520Manager%2520for%2520VCF%2520Private%2520AI%2520Services%2522,%2522VMware%2520HCX%2522,%2522VMware%2520Live%2520Recovery%2522,%2522VMware%2520NSX%2522,%2522VMware%2520SDDC%2520Manager%2520/%2520VCF%2520Installer%2522,%2522VMware%2520Site%2520Recovery%2520Manager%2522,%2522VMware%2520vCenter%2520Server%2522,%2522VMware%2520vDefend%2520Firewall%2522,%2522VMware%2520vDefend%2520Firewall%2520with%2520Advanced%2520Threat%2520Prevention%2522,%2522VMware%2520vSAN%2522,%2522VMware%2520vSphere%2520ESXi%2522,%2522VMware%2520vSphere%2520Foundation%2522,%2522VMware%2520vSphere%2520Kubernetes%2520Service%2522%255D%257D%255D&uid=25b4c588-e69f-11ea-beba-0242ac12000b&resultsPerPage=10&exactPhrase=&withOneOrMore=&withoutTheWords=&pageSize=10&language=en
