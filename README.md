@@ -18,7 +18,7 @@ Harbor host, project, and ECR-mirror path where shown.
 
 ## Contents
 
-1. [The one thing to understand first](#1-the-one-thing-to-understand-first)
+1. [Two upgrades in one](#1-two-upgrades-in-one)
 2. [Prerequisites](#2-prerequisites)
 3. [Pre-upgrade preparation](#3-pre-upgrade-preparation)
 4. [State checkpoints (before and after)](#4-state-checkpoints-before-and-after)
@@ -32,7 +32,7 @@ Harbor host, project, and ECR-mirror path where shown.
 
 ---
 
-## 1. Two Upgrades in One
+## 1. Two upgrades in one
 
 The installer presents the upgrade as a single operation. It is really **two
 upgrades with two different zones**, and the second one silently reaches
