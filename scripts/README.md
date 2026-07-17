@@ -64,6 +64,8 @@ Per snapshot directory:
 | File | Dimension |
 | --- | --- |
 | `repositories.txt`, `packages-installed.txt`, `pkgr.txt`, `pkgi.txt` | Tanzu repos / installed packages / versions |
+| `pkgr-detail.txt` | PackageRepository substance — imgpkgBundle **image/tag**, reconcile status, owner (the `describe pkgr tanzu-standard` fields `-o wide` hides; on guests the 1.4.4 upgrade repoints tanzu-standard at the TMC-SM-mirrored catalog) |
+| `pkg-catalog.txt` | Offered `PackageMetadata` names — makes the `*.tanzu.vmware.com` (tkg) → `*.kubernetes.vmware.com` (vks) offerings swap visible |
 | `pkgi-constraints.txt`, `pkgi-status.txt` | PackageInstall version constraints and reconcile status |
 | `component-versions.txt` | Explicit version matrix for cert-manager, Contour, fluxcd, velero — package version **and** runtime image tag |
 | `nodes.txt` | Node states |

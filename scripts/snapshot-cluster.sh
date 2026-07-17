@@ -48,6 +48,19 @@ dedupe_line_images() {
 tanzu package repository list -A > "$OUT/repositories.txt"       2>/dev/null || true
 tanzu package installed list  -A > "$OUT/packages-installed.txt" 2>/dev/null || true
 kubectl get pkgr -A -o wide      > "$OUT/pkgr.txt"               2>/dev/null || true
+# PackageRepository substance (the guest-cluster `describe pkgr tanzu-standard`
+# in diff-friendly form): `get pkgr -o wide` shows only NAME/AGE/DESC/PAUSED and
+# hides the one field the upgrade actually moves — the imgpkgBundle image/tag. On
+# a guest cluster the 1.4.4 upgrade repoints tanzu-standard at the TMC-SM-mirrored
+# catalog (…/packages/standard/repo:vYYYY.M.DD), so capture image + reconcile
+# status + owner annotation per repo.
+kubectl get pkgr -A -o jsonpath='{range .items[*]}{.metadata.namespace}/{.metadata.name}{"\t"}image={.spec.fetch.imgpkgBundle.image}{"\t"}status={.status.friendlyDescription}{"\t"}owner={.metadata.annotations.tanzu\.vmware\.com/owner}{"\n"}{end}' 2>/dev/null \
+  | sort > "$OUT/pkgr-detail.txt" || true
+# Offered catalog (PackageMetadata names the repo serves). The 1.4.4 repo swap
+# adds the new `*.kubernetes.vmware.com` (vks) offerings alongside/instead of the
+# old `*.tanzu.vmware.com` (tkg) ones — a diff here makes that swap visible.
+kubectl get packagemetadatas.data.packaging.carvel.dev -A --no-headers 2>/dev/null \
+  | awk '{print $1"/"$2}' | sort > "$OUT/pkg-catalog.txt" || true
 kubectl get pkgi -A -o wide      > "$OUT/pkgi.txt"               2>/dev/null || true
 # What each PackageInstall pins (a wide constraint uptakes the new catalog max)
 kubectl get pkgi -A -o jsonpath='{range .items[*]}{.metadata.namespace}/{.metadata.name}: {.spec.packageRef.refName} @ {.spec.packageRef.versionSelection.constraints}{"\n"}{end}' 2>/dev/null \

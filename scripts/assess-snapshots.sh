@@ -93,6 +93,35 @@ assess_ctx() {
     fi
   fi
 
+  # 1b. PackageRepository image/tag & reconcile (the `describe pkgr` substance) --
+  # Guest clusters: the 1.4.4 upgrade repoints tanzu-standard at the TMC-SM
+  # mirrored catalog, so the imgpkgBundle image/tag is expected to move — but the
+  # repo must still reconcile. A non-succeeded status here is a real finding.
+  if exists "$A/pkgr-detail.txt"; then
+    local prfail prmove
+    prfail=$(grep -v 'status=Reconcile succeeded' "$A/pkgr-detail.txt" | grep -viE '^[[:space:]]*$')
+    prmove=$(ndiff "$B/pkgr-detail.txt" "$A/pkgr-detail.txt" | grep '^>' | sed 's/^> *//' | grep -viE '^[[:space:]]*$')
+    if [ -n "$prfail" ]; then
+      row '!!' 'PackageRepository reconcile (pkgr image/status)' "not succeeded: $(printf '%s' "$prfail" | oneline)"
+    elif [ -n "$prmove" ]; then
+      row 'ok' 'PackageRepository image/tag (pkgr)' "reconciled; image moved (expected 1.4.4 catalog repoint): $(printf '%s' "$prmove" | oneline)"
+    else
+      row 'ok' 'PackageRepository image/tag (pkgr)' 'reconciled; no image/tag change'
+    fi
+  fi
+
+  # 1c. Offered package catalog (tkg -> vks offerings swap) -------------------
+  if exists "$A/pkg-catalog.txt"; then
+    local newpkgs droppedpkgs
+    newpkgs=$(comm -13 <(sort -u "$B/pkg-catalog.txt" 2>/dev/null) <(sort -u "$A/pkg-catalog.txt") | grep -viE '^[[:space:]]*$')
+    droppedpkgs=$(comm -23 <(sort -u "$B/pkg-catalog.txt" 2>/dev/null) <(sort -u "$A/pkg-catalog.txt") | grep -viE '^[[:space:]]*$')
+    if [ -z "$newpkgs" ] && [ -z "$droppedpkgs" ]; then
+      row 'ok' 'package catalog (offerings)' 'unchanged'
+    else
+      row 'rv' 'package catalog (offerings)' "changed — confirm vks/tkg swap intended: +[$(printf '%s' "$newpkgs" | oneline)] -[$(printf '%s' "$droppedpkgs" | oneline)]"
+    fi
+  fi
+
   # 2. PackageInstall reconcile status ----------------------------------------
   if exists "$A/pkgi-status.txt"; then
     local notok
