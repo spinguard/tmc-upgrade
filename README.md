@@ -588,19 +588,48 @@ kubectl get pkgi -A | grep -i velero   # expect: none — Velero is agent-manage
   0.7.1) are matched to 1.13. A manual bump risks breaking BSLs, schedules, and
   existing backup/restore compatibility.
 
-**Supported path — upgrade TMC.** Velero version is a function of the TMC SM
-release, so move Velero forward by upgrading TMC SM to a release whose Data
-Protection bundles the target Velero. Confirm the exact TMC → Velero mapping in
-the **Data Protection component matrix** of the target release notes (1.4.4 →
-1.13.2; a later line carries newer Velero). The new Velero + plugin images then
-roll into each DP-enabled guest's `velero` namespace the same agent-driven way
-the rest of this runbook describes.
+**Nominal path — upgrade TMC (conditional, and may never materialize).** Within
+TMC SM, the Data Protection Velero version is bound to the TMC SM release: Velero
+advances _only_ when you upgrade TMC SM to a release whose Data Protection bundle
+ships a newer Velero. Confirm the exact TMC → Velero mapping in the **Data
+Protection component matrix** of the target release notes (1.4.4 → 1.13.2). If —
+and only if — a later TMC SM line ships a newer Velero, upgrading TMC rolls the
+new Velero + plugin images into each DP-enabled guest's `velero` namespace the
+same agent-driven way the rest of this runbook describes.
 
-**Only alternative:** disable TMC Data Protection and run a **standalone**
-upstream Velero yourself. That gets you any Velero version immediately but you
+> **Do not plan around a future newer-Velero TMC release.** This path assumes TMC
+> SM will keep pace with upstream Velero, which is not assured. Broadcom's stated
+> strategic direction is to consolidate data protection into VCF and VCF
+> Automation and to wind TMC down over time, retaining it only for the near term.
+> There is no formal end-of-life notice — but equally no commitment to a
+> newer-Velero TMC SM line. Treat "wait for a TMC release with newer Velero" as a
+> possibility that may not happen, not as a roadmap item. If you need a newer
+> Velero, plan on the out-of-band path below rather than on a future TMC upgrade.
+
+**Only alternative today — run Velero out of band of TMC.** Disable TMC Data
+Protection and either run a **standalone** upstream Velero yourself, or adopt
+VCF's own data protection. This gets you a current Velero immediately but you
 lose TMC-integrated backup management (policies, schedules, and the TMC UI). It
-is a decoupling decision, not an upgrade — not recommended just to advance one
-minor version.
+is a decoupling decision, not an upgrade — but given the caveat above, it is the
+path that does not depend on a TMC release that may never ship.
+
+> **VCF 9.x supports current Velero.** If your platform is (or is moving to) VCF
+> 9.x, later Velero versions are supported natively — unlike TMC SM, which is
+> pinned to 1.13.2. Per the VCF 9.0 **Version Matrix for Velero** for VKS
+> clusters (CSI-snapshot method)[^vcf-velero]:
+>
+> | Velero | AWS plugin | Kubernetes |
+> | ------ | ---------- | ---------- |
+> | `v1.17.2_vmware.1` | `v1.13.1_vmware.1` | 1.31 – 1.34 |
+> | `v1.16.2_vmware.3` | `v1.12.2_vmware.1` | 1.31 – 1.33 |
+> | `v1.15.2_vmware.1` | `v1.11.1_vmware.1` | 1.28 – 1.32 |
+>
+> At the Supervisor level, the Velero Plugin for vSphere on VCF 9.0 is the `1.8.x`
+> line (e.g. `1.8.0-embedded`). Confirm current numbers against the matrix before
+> you rely on them; Broadcom revises these per Supervisor/VKS release.
+
+[^vcf-velero]: VCF 9.0 — Version Matrix for Velero (VKS clusters):
+<https://techdocs.broadcom.com/us/en/vmware-cis/vcf/vcf-service-administration-and-development/9-0/managing-vsphere-kuberenetes-service-clusters-and-workloads/backup-and-restore-workloads-using-the-velero-plugin-for-vsphere/version-matrix-for-velero.html>
 
 > **Broadcom support (portal).** Support-portal query confirming the supported
 > Velero version for TMC 1.4.4 and whether/how a newer Velero can be run:
