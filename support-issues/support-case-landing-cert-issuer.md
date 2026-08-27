@@ -1,24 +1,145 @@
-# TMC Self-Managed 1.4.5 — public `landing` endpoint reissued against the internal development CA
+# TMC Self-Managed 1.4.5 — public `landing` endpoint moved to the internal CA by a template change
 
-**Summary:** On a package reconcile, TMC SM 1.4.5 changed the `issuerRef` of
-`Certificate/landing-service-server-tls` from the operator-supplied
-`ClusterIssuer/local-issuer` to the internal `Issuer/dev` (`CN=Olympus Development CA`).
-`landing.tmc.lab1.mmtm.ai` is a publicly-ingressed hostname whose TLS is terminated with that
-same secret, so the browser-facing endpoint now presents a certificate chained to an internal
-development CA that no operator would have in their trust store. The `serverTLS.clusterIssuer`
-value in `sm_values.yaml` is honored for every other externally-reachable hostname and ignored
-for this one. Because TMC's Envoy also emits HSTS, the resulting error is **not click-through
-bypassable** in Chrome.
+**Summary:** Between 1.4.4 and 1.4.5 a single line of the `landing-service` certificate template
+was changed from `externalIssuerRef` to `internalIssuerRef`. `externalIssuerRef` is where the
+operator's `serverTLS.clusterIssuer` value is wired in; `internalIssuerRef` is a chart default
+(`kind: Issuer, name: dev`) that TMC Self-Managed does not expose. The effect is that
+`landing.tmc.<domain>` — a browser-facing hostname, and the first hop of the login flow — is now
+served a certificate chained to TMC's internal, install-time-generated service CA
+(`CN=Olympus Development CA`) instead of the operator-supplied CA.
+
+The hostname, the Ingress, and the load balancer are unchanged. Only the signature underneath
+changed, to one no browser has reason to trust. Because TMC's Envoy also sends HSTS on this
+host, the resulting error is **not click-through bypassable**, so the console becomes
+unreachable on upgrade with no browser-side recovery. No `sm_values.yaml` setting corrects it.
+
+**The fix is a one-token revert: restore `externalIssuerRef` for `landing-service-server-tls`,
+as in 1.4.4.**
 
 | Field | Value |
 |---|---|
-| TMC Self-Managed | 1.4.5 |
+| Regression introduced in | 1.4.5 (upgraded from 1.4.4 on 2026-08-26 23:31 UTC) |
 | Component | `landing-service` |
-| Component revision | `e36db45d2e43e9f0d9c376cec0c1ef5ec0bf7166` |
+| Component revision | `d1146d7e…` (1.4.4) → `e36db45d2e43e9f0d9c376cec0c1ef5ec0bf7166` (1.4.5) |
+| Template | `upstream/templates/global-services/025-certificate-landing-service-server-tls.yaml` |
 | Component contact | `olympus-jigglypuff@vmware-csp.pagerduty.com` |
 | Affected hostname | `landing.tmc.lab1.mmtm.ai` |
 | Changed | 2026-08-26 23:32:33 UTC |
 | Observed | 2026-08-27 UTC |
+
+---
+
+## Root cause
+
+Both the `1.4.4` and `1.4.5` package-repository bundles were still present in the local registry,
+so the templates could be pulled and diffed directly.
+
+`upstream/templates/global-services/025-certificate-landing-service-server-tls.yaml`:
+
+```diff
+- issuerRef: {{ .Values.externalIssuerRef | toYaml | nindent 4 }}
++ issuerRef: {{ .Values.internalIssuerRef | toYaml | nindent 4 }}
+```
+
+The two values are defined identically in `upstream/values.yaml` in **both** releases, so the
+values did not move — only the reference to them did:
+
+```yaml
+internalIssuerRef:  {kind: Issuer,        name: dev}
+externalIssuerRef:  {kind: ClusterIssuer, name: letsencrypt-prod}   # overridden by TMC SM
+```
+
+`externalIssuerRef.name` is exactly where the operator's setting is injected, in
+`config/secrets/tmc-local-stack-values.yaml:135` of the outer bundle:
+
+```yaml
+externalIssuerRef:
+  name:  #@ tls_values.clusterIssuer     # <- serverTLS.clusterIssuer from sm_values.yaml
+```
+
+`serverTLS.clusterIssuer` is therefore still wired correctly and still honored everywhere else.
+The landing template simply stopped reading it. Because `internalIssuerRef` is a chart default
+that TMC Self-Managed never surfaces in `sm_values.yaml`, there is no supported configuration
+that corrects this.
+
+The Ingress in front of the certificate is byte-identical between the two releases apart from its
+revision annotation, and still consumes `secretName: landing-service-tls`:
+
+```
+$ diff stack144/…/044-ingress-landing-service-ingress-global.yaml \
+       stack145/…/044-ingress-landing-service-ingress-global.yaml
+7c7
+<     olympus.eng.vmware.com/component.revision: d1146d7efa6b1f721bcd7052d9b2b4901680af54
+---
+>     olympus.eng.vmware.com/component.revision: e36db45d2e43e9f0d9c376cec0c1ef5ec0bf7166
+```
+
+### Scope of the template change
+
+In 1.4.4, four certificate templates consumed `externalIssuerRef`. In 1.4.5, two do:
+
+| Template | 1.4.4 | 1.4.5 |
+|---|---|---|
+| `024-certificate-auth-manager-server-tls` | external | external |
+| `222-certificate-stack-tls` | external | external |
+| `025-certificate-landing-service-server-tls` | external | **internal** |
+| `026-certificate-tenancy-service-server-tls` | external | **internal** |
+
+`tenancy-service` moved too, but has no public Ingress, so the change is invisible there. That
+contrast is the point: moving a certificate to the internal CA is only damaging where the
+hostname is browser-facing. `landing` is the one that is.
+
+### The BYO-certificate guard was also dropped
+
+In 1.4.4 the landing Certificate was wrapped in `{{- if not .Values.certificateImport }}`, so
+operators supplying their own certificates got no generated Certificate at all. In 1.4.5 that
+wrapper is gone, while the sibling `auth-manager` template kept its:
+
+| Template | 1.4.4 | 1.4.5 |
+|---|---|---|
+| `024-certificate-auth-manager-server-tls` | guarded | guarded |
+| `025-certificate-landing-service-server-tls` | **guarded** | **no guard** |
+
+This widens the blast radius beyond self-signed deployments: a `certificateImport` deployment now
+has an internal-CA certificate created over the top of the operator's own.
+
+### Version timeline
+
+The Package objects date the upgrade precisely. Twelve third-party packages retain their original
+install timestamps; the four TMC packages were recreated:
+
+```
+2026-08-21T13:23:15Z  (x12)       contour, kafka, redis, minio, pinniped, cert-manager, …
+2026-08-26T23:31:43Z  1.4.5       tmc.tanzu.vmware.com.1.4.5
+2026-08-26T23:31:55Z  0.1.8751591 tmc-local-stack-secrets, tmc-local-support
+2026-08-26T23:31:56Z  0.1.8751591 tmc-local-stack
+```
+
+A new `creationTimestamp` on a name that embeds the version means the object did not previously
+exist — the deployment was on 1.4.4 (stack `0.1.3839058`) until 23:31:43, and the landing
+certificate was reissued fifty seconds later at 23:32:33.
+
+---
+
+## Plain-language summary
+
+TMC uses two private certificate authorities. One is **external** — the operator supplies it, and
+it signs the handful of hostnames a person types into a browser. The other is **internal** — TMC
+generates it at install time so its own services can authenticate to each other inside the
+cluster. Only the external CA ever needs to be trusted by a browser; the internal one is not
+meant to leave the cluster.
+
+`landing.tmc.<domain>` is a browser hostname. It is the first page of the login flow.
+
+In 1.4.4 its certificate was signed by the external CA, so any browser trusting the operator's CA
+could reach it. In 1.4.5 one line of the template was changed to sign it with the internal CA
+instead. The web address is the same and the load balancer is the same — only the signature
+changed, to one that no browser has any reason to trust.
+
+The result is that the TMC console becomes unreachable on upgrade, and because TMC also sends
+HSTS on that hostname, the browser refuses to offer the usual "proceed anyway" bypass. There is
+no setting that corrects it: the internal issuer is a chart default that TMC Self-Managed does
+not expose.
 
 ---
 
@@ -270,6 +391,14 @@ reverted on the next reconcile.
   `CertificateRequest` is `system:serviceaccount:cert-manager:cert-manager`. The serial on the
   wire matches the in-cluster secret byte for byte (E5). No external CA, key, or endpoint is
   involved.
+- **A "development certificate" shipped in the release.** Nothing is shipped. `Issuer/dev-root`
+  is `{"selfSigned":{}}` and `Certificate/dev-ca` (`isCA: true`, `duration: 87600h`) is minted by
+  cert-manager at install time — the CA's `notBefore` (`Aug 21 13:38:44 2026 GMT`) equals the
+  `creationTimestamp` of `secret/dev-ca-key` to the second. The key is generated in-cluster,
+  unique to this deployment, and has never left it. "Development" is a naming artifact of the
+  Olympus source tree; the CA is TMC's internal service-mesh root, and 46 of 51 certificates
+  using it is correct design. The defect is one browser-facing hostname crossing that boundary,
+  not the existence of the internal CA.
 - **Expired certificate.** `notAfter=Aug 27 19:32:34 2027`; the error is
   `ERR_CERT_AUTHORITY_INVALID`, not a date failure.
 - **Hostname mismatch.** `landing.tmc.lab1.mmtm.ai` is present in both `commonName` and the SAN
@@ -290,16 +419,22 @@ reverted on the next reconcile.
 
 ## Reproduction
 
-1. Install TMC Self-Managed 1.4.5 with `serverTLS.type: clusterIssuer` and a
+1. Install TMC Self-Managed **1.4.4** with `serverTLS.type: clusterIssuer` and a
    `clusterIssuer.name` naming an operator-controlled CA.
-2. Confirm at install time that `landing.tmc.lab1.mmtm.ai` serves a certificate chained to that
-   CA, and that `CertificateRequest` revision 1 for `landing-service-server-tls` names
-   `ClusterIssuer/local-issuer`.
-3. Allow kapp-controller to reconcile the `tanzu-mission-control` PackageInstall.
-4. Observe `Certificate/landing-service-server-tls` advance to generation 2 with
+2. Confirm `landing.tmc.<domain>` serves a certificate chained to that CA, and that
+   `CertificateRequest` revision 1 for `landing-service-server-tls` names
+   `ClusterIssuer/<your issuer>`.
+3. Visit the console in Chrome so the HSTS policy is cached over a clean connection. This step
+   matters — it is what removes the bypass later.
+4. Upgrade the package repository to **1.4.5** and let kapp-controller reconcile.
+5. Observe `Certificate/landing-service-server-tls` advance to generation 2 with
    `issuerRef: {kind: Issuer, name: dev}`, and a revision-2 `CertificateRequest` issued by `dev`.
-5. Load the console in Chrome — `ERR_CERT_AUTHORITY_INVALID` with no bypass available, because
-   HSTS was cached while the endpoint was still correctly certified.
+6. Reload the console — `ERR_CERT_AUTHORITY_INVALID` with no bypass offered.
+
+The template diff in **Root cause** is reproducible without a cluster: pull both
+package-repository bundles, follow the `tmc-local-stack` package to its nested bundle
+(`0.1.3839058` for 1.4.4, `0.1.8751591` for 1.4.5), and diff
+`upstream/templates/global-services/025-certificate-landing-service-server-tls.yaml`.
 
 ---
 
@@ -316,7 +451,7 @@ kubectl -n tmc-local delete secret landing-service-tls
 ```
 
 Contour watches the Ingress TLS secret and picks up the replacement without a restart. This
-returns the deployment to the state it shipped in on Aug 21, which ran for five days — including
+returns the certificate to its 1.4.4 issuer, which ran for five days in this deployment — including
 whatever internal mTLS uses the same secret (E5) — so the risk is low. It is nonetheless a
 workaround: the package must stay paused, which blocks all further TMC reconciliation, and the
 change reverts on unpause.
@@ -340,20 +475,23 @@ rather than fixing anything, and the parent policy is re-published on the next c
 
 ## What we need
 
-1. **Is the `dev` issuer on `landing-service-server-tls` intentional?** The certificate's
-   `commonName` is a public hostname and the public Ingress terminates with its secret (E4/E5),
-   which suggests it is not.
-2. **Why did the issuer change on a reconcile of an already-installed 1.4.5?** Revision 1 used
-   `local-issuer` (E3). We would like to know which template change between the Aug 21 apply and
-   the Aug 26 reconcile moved it, and whether upgrading from an earlier release triggers the same
-   flip.
-3. **Should `landing-service-tls` be one secret or two?** Serving an internal mTLS identity and a
-   browser-facing endpoint from a single secret forces one issuer to satisfy both trust domains.
-   A separate `local-issuer`-signed certificate for the public hostname would remove the
-   ambiguity.
-4. **Is there a supported override?** We can find no `sm_values.yaml` key that pins the landing
-   certificate to `serverTLS.clusterIssuer` the way the other four are pinned.
-5. **Confirm the intended fix and target release**, so we can drop the paused-package workaround.
+1. **Confirm the `externalIssuerRef` → `internalIssuerRef` change on
+   `025-certificate-landing-service-server-tls.yaml` was unintended**, and restore
+   `externalIssuerRef` as in 1.4.4. This is the whole fix.
+2. **Confirm the same for `026-certificate-tenancy-service-server-tls.yaml`.** It moved in the
+   same release. It is harmless in this deployment because tenancy has no public Ingress, but we
+   would like to know whether that is by design or the same oversight.
+3. **Was dropping the `certificateImport` guard on the landing template intentional?** The
+   sibling `auth-manager` template kept its. As it stands, a bring-your-own-certificate
+   deployment upgrading to 1.4.5 gets an internal-CA certificate generated over the top.
+4. **Should `landing-service-tls` be one secret or two?** It is simultaneously the component's
+   internal mTLS identity and the secret terminating a public Ingress, which forces a single
+   issuer to satisfy both trust domains. A separate external-issuer certificate for the public
+   hostname would remove the ambiguity permanently rather than reverting one token.
+5. **Target release for the fix**, so we can drop the client-side trust workaround.
+6. **Is any release-note or upgrade-path warning planned?** Any 1.4.4 → 1.4.5 upgrade on a
+   self-signed or BYO-certificate deployment loses console access at the moment the package
+   reconciles, with no browser-side recovery path (see *Note on HSTS and diagnosis*).
 
 ---
 
