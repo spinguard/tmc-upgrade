@@ -16,11 +16,11 @@ oidc:
   clientSecret: <clientSecret>
   issuerURL: https://keycloak.lab1.mmtm.ai:9443/realms/tmc
   issuerType: pinniped
-harborProject: harbor.lab1.mmtm.ai/tmc-sm
+harborProject: mgmt-harbor.lab1.mmtm.ai/tmc-sm
 contourEnvoy:
   serviceType: LoadBalancer
   loadBalancerClass: ""
-  loadBalancerIP: 192.168.204.196
+  loadBalancerIP: 192.168.204.220
   nodeSelector: {}
   serviceAnnotations: {}
   nodeTolerations: []

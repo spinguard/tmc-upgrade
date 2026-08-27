@@ -2,9 +2,9 @@ apiVersion: cluster.x-k8s.io/v1beta1
 kind: Cluster
 metadata:
   labels:
-    cluster.x-k8s.io/cluster-name: tmc
+    cluster.x-k8s.io/cluster-name: test2
     run.tanzu.vmware.com/tkr: v1.33.6---vmware.1-fips-vkr.2
-  name: tmc
+  name: test2
   namespace: tmc-sm
 spec:
   clusterNetwork:
@@ -20,17 +20,11 @@ spec:
     classNamespace: vmware-system-vks-public
     controlPlane:
       metadata: {}
-      replicas: 3
+      replicas: 1
       variables:
         overrides:
         - name: vmClass
-          value: best-effort-large
-        - name: volumes
-          value:
-          - capacity: 40G
-            mountPath: /var/lib/containerd
-            name: containerd
-            storageClass: nfs-pool-1-policy
+          value: best-effort-small
     variables:
       - name: volumes
         value: []
@@ -61,14 +55,10 @@ spec:
       - class: node-pool
         metadata: {}
         name: md-0
-        replicas: 3
+        replicas: 1
         variables:
           overrides:
           - name: vmClass
-            value: best-effort-large
-          - name: volumes
-            value:
-            - capacity: 40G
-              mountPath: /var/lib/containerd
-              name: containerd
-              storageClass: nfs-pool-1-policy
+            value: best-effort-small
+          - name: storageClass
+            value: nfs-pool-1-policy

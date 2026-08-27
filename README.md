@@ -10,7 +10,7 @@ The core runbook for upgrading Tanzu Mission Control Self-Managed (TMC SM) from
 > environment is in a known-good, fully-migrated state. Migration tooling lives
 > separately in `../tmc-migration-scripts`.
 
-**Environment of record:** lab1 (`harbor.lab1.mmtm.ai`, air-gapped, self-signed
+**Environment of record:** lab1 (`mgmt-harbor.lab1.mmtm.ai`, air-gapped, self-signed
 Harbor). Commands and paths below reflect that lab; substitute your own
 Harbor host, project, and ECR-mirror path where shown.
 
@@ -108,7 +108,7 @@ SM stamps into guest `PackageRepository` objects:
 ```
 
 lab1 example:
-`harbor.lab1.mmtm.ai/tmc-sm/498533941640.dkr.ecr.us-west-2.amazonaws.com/packages/standard/repo:v2026.1.21`
+`mgmt-harbor.lab1.mmtm.ai/tmc-sm/498533941640.dkr.ecr.us-west-2.amazonaws.com/packages/standard/repo:v2026.1.21`
 
 **Source:** `projects.packages.broadcom.com/tkg/packages/standard/repo:v2026.1.21`
 (fallback: `.../tanzu_kubernetes_grid/packages/standard/repo:v2026.1.21`).
@@ -125,7 +125,7 @@ imgpkg copy \
 # Step 2 — move tar to a host with Harbor access, then:
 imgpkg copy \
   --tar tanzu-standard-v2026.1.21.tar \
-  --to-repo harbor.lab1.mmtm.ai/tmc-sm/498533941640.dkr.ecr.us-west-2.amazonaws.com/packages/standard/repo \
+  --to-repo mgmt-harbor.lab1.mmtm.ai/tmc-sm/498533941640.dkr.ecr.us-west-2.amazonaws.com/packages/standard/repo \
   --registry-ca-cert-path /path/to/harbor-ca.crt
 ```
 
@@ -348,7 +348,7 @@ Steps 9–10 of the installer are, underneath:
 
 ```bash
 tanzu package repository update tanzu-mission-control-packages \
-  --url harbor.lab1.mmtm.ai/tmc-sm/package-repository:1.4.4 -n tmc-local
+  --url mgmt-harbor.lab1.mmtm.ai/tmc-sm/package-repository:1.4.4 -n tmc-local
 # wait for reconcile, then the platform PackageInstall reconciles to 1.4.4:
 tanzu package installed update tmc --values-file sm_values.yaml -n tmc-local
 ```
