@@ -1,0 +1,14 @@
+#@ load("@ytt:overlay", "overlay")
+
+#! Workaround for TMC Self-Managed 1.4.5 regression: the landing-service
+#! certificate template was switched from externalIssuerRef to
+#! internalIssuerRef, signing a browser-facing hostname with the internal
+#! Olympus Development CA. Restore the operator-supplied ClusterIssuer.
+#! See support-issues/support-case-landing-cert-issuer.md
+#! Remove once the upstream template is fixed.
+#@overlay/match by=overlay.subset({"kind": "Certificate", "metadata": {"name": "landing-service-server-tls"}}), expects="0+"
+---
+spec:
+  issuerRef:
+    kind: ClusterIssuer
+    name: local-issuer

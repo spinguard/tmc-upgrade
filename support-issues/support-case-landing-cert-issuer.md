@@ -159,9 +159,10 @@ development CA has no way through, and the `includeSubDomains` directive publish
 `tmc.lab1.mmtm.ai` re-asserts the policy over `landing` even if the operator deletes the
 `landing` entry by hand.
 
-The change is also self-reverting: kapp-controller reconciles the package roughly every ten
-minutes and re-applies `issuerRef: dev`, so a manual correction to the `Certificate` does not
-survive without pausing the `PackageInstall`.
+The change is also self-reverting: `App/tmc-local-stack` reconciles roughly every ten minutes and
+re-applies `issuerRef: dev`, so a manual correction to the `Certificate` does not survive. Note
+that pausing `PackageInstall/tanzu-mission-control` is *not* sufficient — it is a different App and
+does not own this Certificate (E10).
 
 ---
 
@@ -377,8 +378,53 @@ $ kubectl -n tmc-local get app tmc-local-stack -o jsonpath='{.status.deploy.upda
 ```
 
 All 16 `tmc-local` apps report `Reconcile succeeded` within the last ten minutes. Patching
-`issuerRef` back to `local-issuer` without pausing `PackageInstall/tanzu-mission-control` is
-reverted on the next reconcile.
+`issuerRef` back to `local-issuer` is reverted on the next reconcile of the owning App — which is
+`tmc-local-stack`, not `tanzu-mission-control` (E10).
+
+### E10 — The Certificate is owned by `tmc-local-stack`, not `tanzu-mission-control`
+
+This matters for anyone applying the workaround, and it is why the first attempt in this
+deployment failed. The Certificate's kapp ownership label names the `tmc-local-stack` App:
+
+```
+$ kubectl -n tmc-local get certificate landing-service-server-tls -o jsonpath='{.metadata.labels}'
+{"kapp.k14s.io/app":"1787319617191704625", ...}
+
+$ kubectl -n tmc-local get cm tmc-local-stack.app -o jsonpath='{.data.spec}' | jq -r .labelValue
+1787319617191704625          <-- owner
+$ kubectl -n tmc-local get cm tanzu-mission-control.app -o jsonpath='{.data.spec}' | jq -r .labelValue
+1787318594736730403
+```
+
+`tanzu-mission-control` deploys the PackageInstalls; `tmc-local-stack` deploys the workload
+manifests, including this Certificate. They reconcile independently, so pausing the former leaves
+the latter running:
+
+```
+$ kubectl -n tmc-local get packageinstall -o custom-columns=NAME:.metadata.name,PAUSED:.spec.paused
+tanzu-mission-control   true
+tmc-local-stack         <none>
+
+$ kubectl -n tmc-local get app -o custom-columns=NAME:.metadata.name,UPDATED:.status.deploy.updatedAt,DESC:.status.friendlyDescription
+tanzu-mission-control   2026-09-01T15:25:38Z   Canceled/paused
+tmc-local-stack         2026-09-16T08:38:27Z   Reconcile succeeded
+```
+
+The `CertificateRequest` history dates the failed workaround to the second:
+
+```
+2026-08-21T13:40:19Z  rev=1  ClusterIssuer/local-issuer   install
+2026-08-26T23:32:33Z  rev=2  Issuer/dev                   1.4.5 upgrade — the defect
+2026-09-01T15:25:38Z         -- PackageInstall/tanzu-mission-control paused --
+2026-09-01T15:27:12Z  rev=3  ClusterIssuer/local-issuer   workaround patch applied
+2026-09-01T15:27:23Z  rev=4  ClusterIssuer/local-issuer   secret deleted → reissue
+2026-09-01T15:36:52Z  rev=5  Issuer/dev                   tmc-local-stack reconcile reverted it
+2026-09-16T08:46:11Z  rev=6  ClusterIssuer/local-issuer   ytt overlay applied — holds
+```
+
+The correction survived **9 minutes 29 seconds** — one `tmc-local-stack` sync interval. This is
+worth noting in any customer-facing guidance: an operator who verifies the workaround immediately
+after applying it will see it working and conclude the problem is solved.
 
 ---
 
@@ -440,7 +486,54 @@ package-repository bundles, follow the `tmc-local-stack` package to its nested b
 
 ## Workarounds evaluated
 
-**Restore the intended issuer (requires pausing the package).**
+**Restore the intended issuer via the stack's own ytt overlay (applied; durable).**
+
+This is the recommended workaround. `PackageInstall/tmc-local-stack` already carries an overlay
+hook that TMC itself uses:
+
+```
+ext.packaging.carvel.dev/ytt-paths-from-secret-name.100: host-aliases-overlay
+ext.packaging.carvel.dev/ytt-paths-from-secret-name.101: certificate-overlay
+```
+
+and the App's template pipeline is `helmTemplate → ytt(those secrets) → kbld`. An overlay added to
+`secret/certificate-overlay` is therefore applied *after* Helm renders `issuerRef: dev`, on every
+reconcile:
+
+```yaml
+#@ load("@ytt:overlay", "overlay")
+
+#@overlay/match by=overlay.subset({"kind": "Certificate", "metadata": {"name": "landing-service-server-tls"}}), expects="0+"
+---
+spec:
+  issuerRef:
+    kind: ClusterIssuer
+    name: local-issuer
+```
+
+```bash
+kubectl -n tmc-local patch secret certificate-overlay --type=merge \
+  -p "{\"data\":{\"landing-issuer-overlay.yml\":\"$(base64 < landing-issuer-overlay.yml | tr -d '\n')\"}}"
+kubectl -n tmc-local annotate packageinstall tmc-local-stack \
+  kctrl.carvel.dev/change-request=reconcile-$(date +%s) --overwrite
+```
+
+No `Certificate` patch and no secret deletion are needed — changing `issuerRef` makes cert-manager
+reissue into `landing-service-tls` on its own, and Contour picks the new secret up without a
+restart. Critically, `tmc-local-stack` stays **unpaused** and fully reconciling; the correction is
+re-asserted on each pass rather than reverted, and `kapp.k14s.io/original` on the Certificate now
+records `{"kind":"ClusterIssuer","name":"local-issuer"}` as the desired state.
+
+The one constraint: `secret/certificate-overlay` is owned by the `tanzu-mission-control` App
+(kapp app `1787318594736730403`), so that PackageInstall must remain paused or kapp restores the
+stock overlay. Pausing only the outer orchestration app is a far smaller blast radius than
+pausing the stack — the TMC workload stack continues to reconcile normally.
+
+Verified 2026-09-16 08:46 UTC: `CertificateRequest` revision 6 issued by `ClusterIssuer/local-issuer`,
+`issuer=CN=TMC Self-Managed CA` on the wire, `security verify-cert` successful, and
+`curl` without `-k` returns the expected 307 to `auth.tmc.lab1.mmtm.ai`.
+
+**Patch the Certificate with the package paused (insufficient as originally written).**
 
 ```bash
 kubectl -n tmc-local patch packageinstall tanzu-mission-control \
@@ -450,11 +543,11 @@ kubectl -n tmc-local patch certificate landing-service-server-tls \
 kubectl -n tmc-local delete secret landing-service-tls
 ```
 
-Contour watches the Ingress TLS secret and picks up the replacement without a restart. This
-returns the certificate to its 1.4.4 issuer, which ran for five days in this deployment — including
-whatever internal mTLS uses the same secret (E5) — so the risk is low. It is nonetheless a
-workaround: the package must stay paused, which blocks all further TMC reconciliation, and the
-change reverts on unpause.
+**This does not hold.** Pausing `tanzu-mission-control` pauses the wrong PackageInstall. The
+landing Certificate is owned by `tmc-local-stack`, which is a separate, independently-reconciling
+App — see E10. The patch survives only until the next `tmc-local-stack` sync, roughly ten minutes.
+Pausing `tmc-local-stack` as well does make it hold, but freezes all TMC stack reconciliation,
+which is why the overlay above is preferred.
 
 **Trust the development CA on each client.**
 

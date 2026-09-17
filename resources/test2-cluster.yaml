@@ -2,9 +2,9 @@ apiVersion: cluster.x-k8s.io/v1beta1
 kind: Cluster
 metadata:
   labels:
-    cluster.x-k8s.io/cluster-name: test2
-    run.tanzu.vmware.com/tkr: v1.33.6---vmware.1-fips-vkr.2
-  name: test2
+    cluster.x-k8s.io/cluster-name: dev4
+    run.tanzu.vmware.com/tkr: v1.35.2+vmware.1-vkr.3
+  name: dev4
   namespace: tmc-sm
 spec:
   clusterNetwork:
@@ -16,7 +16,7 @@ spec:
       cidrBlocks:
       - 10.97.0.0/16
   topology:
-    class: builtin-generic-v3.4.0
+    class: builtin-generic-v3.6.0
     classNamespace: vmware-system-vks-public
     controlPlane:
       metadata: {}
@@ -49,7 +49,7 @@ spec:
                   secretRef:
                     key: ca.crt
                     name: harbor-ca
-    version: v1.33.6+vmware.1-fips
+    version: v1.35.2+vmware.1-vkr.3
     workers:
       machineDeployments:
       - class: node-pool

@@ -2,9 +2,9 @@ apiVersion: cluster.x-k8s.io/v1beta1
 kind: Cluster
 metadata:
   labels:
-    cluster.x-k8s.io/cluster-name: tmc
-    run.tanzu.vmware.com/tkr: v1.33.6---vmware.1-fips-vkr.2
-  name: test10
+    cluster.x-k8s.io/cluster-name: dev5
+    run.tanzu.vmware.com/tkr: v1.34.9---vmware.2-vkr.4
+  name: dev5
   namespace: tmc-sm
 spec:
   clusterNetwork:
@@ -16,7 +16,7 @@ spec:
       cidrBlocks:
       - 10.97.0.0/16
   topology:
-    class: builtin-generic-v3.4.0
+    class: builtin-generic-v3.6.0
     classNamespace: vmware-system-vks-public
     controlPlane:
       metadata: {}
@@ -24,13 +24,7 @@ spec:
       variables:
         overrides:
         - name: vmClass
-          value: best-effort-large
-        - name: volumes
-          value:
-          - capacity: 40G
-            mountPath: /var/lib/containerd
-            name: containerd
-            storageClass: nfs-pool-1-policy
+          value: best-effort-small
     variables:
       - name: volumes
         value: []
@@ -55,20 +49,16 @@ spec:
                   secretRef:
                     key: ca.crt
                     name: harbor-ca
-    version: v1.33.6+vmware.1-fips
+    version: v1.34.9---vmware.2-vkr.4
     workers:
       machineDeployments:
       - class: node-pool
         metadata: {}
         name: md-0
-        replicas: 3
+        replicas: 1
         variables:
           overrides:
           - name: vmClass
-            value: best-effort-large
-          - name: volumes
-            value:
-            - capacity: 40G
-              mountPath: /var/lib/containerd
-              name: containerd
-              storageClass: nfs-pool-1-policy
+            value: best-effort-small
+          - name: storageClass
+            value: nfs-pool-1-policy
