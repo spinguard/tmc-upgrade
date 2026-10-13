@@ -3,8 +3,8 @@ kind: Cluster
 metadata:
   labels:
     cluster.x-k8s.io/cluster-name: tmc
-    run.tanzu.vmware.com/tkr: v1.33.6---vmware.1-fips-vkr.2
-  name: test10
+    run.tanzu.vmware.com/tkr: v1.36.1---vmware.4-vkr.5
+  name: tmc
   namespace: tmc-sm
 spec:
   clusterNetwork:
@@ -16,11 +16,11 @@ spec:
       cidrBlocks:
       - 10.97.0.0/16
   topology:
-    class: builtin-generic-v3.4.0
+    class: builtin-generic-v3.7.0
     classNamespace: vmware-system-vks-public
     controlPlane:
       metadata: {}
-      replicas: 1
+      replicas: 3
       variables:
         overrides:
         - name: vmClass
@@ -55,7 +55,7 @@ spec:
                   secretRef:
                     key: ca.crt
                     name: harbor-ca
-    version: v1.33.6+vmware.1-fips
+    version: v1.36.1---vmware.4-vkr.5
     workers:
       machineDeployments:
       - class: node-pool
